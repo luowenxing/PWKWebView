@@ -24,10 +24,10 @@ class PWKWebView:WKWebView {
         self.requestInCaseOf302SetCookie(req, complete: {
             newRequest,resp,data in
             DispatchQueue.main.async {
+                self.syncCookiesInJS()
                 if let Data = data,let Resp = resp {
                     // load data directly for 200 response
                     if #available(iOS 9.0, *) {
-                        self.syncCookiesInJS()
                         let _ = self.webViewLoad(data: Data, resp: Resp)
                     } else {
                         // load request again instead of calling loadHTMLString in case of css/js not working
@@ -47,8 +47,20 @@ class PWKWebView:WKWebView {
         return nil
     }
     
+    // sync cookies at response end
+    // you may call it at delegate method "decidePolicyFor navigationResponse" to handle redirect aditional cookies
+    func syncCookies(response:URLResponse) {
+        if let resp = response as? HTTPURLResponse,let headers = resp.allHeaderFields as? [String:String],let url = response.url {
+            let cookies = HTTPCookie.cookies(withResponseHeaderFields:headers, for:url)
+            for cookie in cookies {
+                HTTPCookieStorage.shared.setCookie(cookie)
+            }
+        }
+        syncCookiesInJS()
+    }
+    
     // sync cookies by js using document.cookie
-    func syncCookiesInJS() {
+    fileprivate func syncCookiesInJS() {
         if let cookies = HTTPCookieStorage.shared.cookies {
             let script = getJSCookiesString(cookies)
             let cookieScript = WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: false)
@@ -120,6 +132,8 @@ extension PWKWebView:URLSessionTaskDelegate {
                     failure()
                 } else {
                     if let resp = response as? HTTPURLResponse {
+                        /* no need for achieve Set-Cookie header because URLSession do it automatically */
+                        
                         let code = resp.statusCode
                         if code == 200 {
                             // for code 200 return data to load data directly
@@ -130,11 +144,6 @@ extension PWKWebView:URLSessionTaskDelegate {
                                 failure()
                                 return
                             }
-                            
-                            /* no need for achieve Set-Cookie header because URLSession do it automatically
-                             if you worry about it uncommit the line */
-                            // self.syncCookies(response)
-                            
                             let request = URLRequest(url: redirectURL, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 5)
                             complete(request, nil, nil)
                         }
@@ -142,15 +151,6 @@ extension PWKWebView:URLSessionTaskDelegate {
                 }
             }
             task.resume()
-        }
-    }
-    
-    private func syncCookies(response:HTTPURLResponse) {
-        if let headers = response.allHeaderFields as? [String:String],let url = response.url {
-            let cookies = HTTPCookie.cookies(withResponseHeaderFields:headers, for:url)
-            for cookie in cookies {
-                HTTPCookieStorage.shared.setCookie(cookie)
-            }
         }
     }
     
